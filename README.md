@@ -72,25 +72,28 @@ The agent uses [Binance x402](https://github.com/bnb-chain/x402) to pay for serv
 ```
 Agent balance: $2.40 (below $3.00 threshold)
       ↓
-twak x402 pay --url https://pro-api.coinmarketcap.com \
-              --amount 0.001 --asset USDT --chain bsc
+twak x402 request https://agentsvc.io/api/search \
+  --max-payment 1000 --prefer-asset USDT \
+  --prefer-network bsc --yes --auto-approve
       ↓
-Payment confirmed on BSC → service access granted
+Server returns HTTP 402 → TWAK pays 0.001 USDT on BSC
       ↓
-Agent continues trading
+Service responds with data → agent uses it and continues
 ```
 
-This is the x402 HTTP payment loop: server returns `402 Payment Required` → TWAK pays from the agent's local wallet → request retries automatically. The agent's private key never leaves the machine.
+This is the x402 HTTP payment loop: server returns `402 Payment Required` with payment details → TWAK signs and pays from the local wallet → request retries with receipt → agent gets the data. Private keys never leave the machine.
+
+`--max-payment` is in atomic units (USDT has 6 decimals: `$0.001 = 1000`).
 
 Configure in `~/.bnb-trading-agent/config.yaml`:
 
 ```yaml
 x402:
   enabled: true
-  service_url: "https://pro-api.coinmarketcap.com"
+  service_url: "https://agentsvc.io/api/search"
   payment_asset: "USDT"
-  payment_amount: 0.001
-  min_balance_usd: 3.0   # trigger self-fund below this
+  max_payment_usdc: 0.001     # $0.001 per request
+  min_balance_usd: 3.0        # trigger when balance drops below $3
 ```
 
 ---
