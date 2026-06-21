@@ -12,6 +12,7 @@ import (
 type AgentConfig struct {
 	CMCAPIKey            string         `yaml:"cmc_api_key"`
 	TWAK                 TWAKConfig     `yaml:"twak"`
+	X402                 X402Config     `yaml:"x402"`
 	TradeIntervalMinutes int            `yaml:"trade_interval_minutes"`
 	Strategy             StrategyConfig `yaml:"strategy"`
 	Policy               TradingPolicy  `yaml:"policy"`
@@ -22,6 +23,13 @@ func DefaultAgentConfig() AgentConfig {
 	return AgentConfig{
 		CMCAPIKey:            "",
 		TWAK:                 TWAKConfig{DryRun: true},
+		X402: X402Config{
+			Enabled:       true,
+			ServiceURL:    "https://pro-api.coinmarketcap.com",
+			PaymentAsset:  "USDT",
+			PaymentAmount: 0.001,
+			MinBalanceUSD: 3.0,
+		},
 		TradeIntervalMinutes: 15,
 		Strategy:             DefaultStrategyConfig(),
 		Policy:               DefaultPolicy(),

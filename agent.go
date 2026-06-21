@@ -13,6 +13,7 @@ type Agent struct {
 	configDir string
 	cmc       *CMCClient
 	twak      *TWAKClient
+	x402      *X402Client
 }
 
 // NewAgent creates an Agent from config. Validates required fields.
@@ -23,11 +24,13 @@ func NewAgent(cfg AgentConfig, configDir string) (*Agent, error) {
 	if cfg.TWAK.WalletAddress == "" && !cfg.TWAK.DryRun {
 		return nil, fmt.Errorf("twak.wallet_address is required when dry_run is false")
 	}
+	twak := NewTWAKClient(cfg.TWAK)
 	return &Agent{
 		cfg:       cfg,
 		configDir: configDir,
 		cmc:       NewCMCClient(cfg.CMCAPIKey),
-		twak:      NewTWAKClient(cfg.TWAK),
+		twak:      twak,
+		x402:      NewX402Client(cfg.X402, twak),
 	}, nil
 }
 
@@ -85,10 +88,15 @@ func (a *Agent) iterate(verbose bool) error {
 		return nil
 	}
 
-	// Step 3: Update portfolio value for drawdown tracking.
+	// Step 3: Update portfolio value and x402 self-fund if balance is low.
 	portfolioUSD, err := a.twak.GetBalance()
 	if err != nil {
 		fmt.Printf("  [warn] could not fetch portfolio balance: %v — using last known\n", err)
+	}
+	if receipt, fundErr := a.x402.SelfFund(portfolioUSD); fundErr != nil {
+		fmt.Printf("  [warn] x402 self-fund: %v\n", fundErr)
+	} else if receipt != nil {
+		fmt.Printf("  x402:      funded %.4f %s (tx: %s)\n", receipt.Amount, receipt.Asset, receipt.TxHash)
 	}
 
 	// Step 4: Run trade guard pipeline.
