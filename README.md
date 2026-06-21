@@ -62,8 +62,36 @@ This agent introduces a **deterministic 5-stage security pipeline** that interce
 | Sponsor | Technology | How it's used |
 |---------|-----------|---------------|
 | **CoinMarketCap** | AI Agent Hub REST API | `/v3/fear-and-greed/latest` for market sentiment; `/v2/cryptocurrency/quotes/latest` for price, 24h/7d change, volume |
-| **Trust Wallet** | Agent Kit CLI (TWAK) | Self-custody local signing — `twak swap`, `twak wallet balance`, `twak compete register`. Private keys never leave the machine. |
-| **BNB Chain** | BSC Mainnet (chain ID 56) | All swaps execute on BSC via PancakeSwap. Agent registered on the competition contract. |
+| **Trust Wallet** | Agent Kit CLI (TWAK) + x402 | Self-custody local signing — `twak swap`, `twak wallet balance`, `twak compete register`, `twak x402 pay`. Private keys never leave the machine. |
+| **BNB Chain** | BSC Mainnet (chain ID 56) | All swaps and x402 payments execute on BSC. Agent registered on the competition contract. |
+
+## x402 — autonomous self-funding
+
+The agent uses [Binance x402](https://github.com/bnb-chain/x402) to pay for services autonomously. No human top-up needed between sessions.
+
+```
+Agent balance: $2.40 (below $3.00 threshold)
+      ↓
+twak x402 pay --url https://pro-api.coinmarketcap.com \
+              --amount 0.001 --asset USDT --chain bsc
+      ↓
+Payment confirmed on BSC → service access granted
+      ↓
+Agent continues trading
+```
+
+This is the x402 HTTP payment loop: server returns `402 Payment Required` → TWAK pays from the agent's local wallet → request retries automatically. The agent's private key never leaves the machine.
+
+Configure in `~/.bnb-trading-agent/config.yaml`:
+
+```yaml
+x402:
+  enabled: true
+  service_url: "https://pro-api.coinmarketcap.com"
+  payment_asset: "USDT"
+  payment_amount: 0.001
+  min_balance_usd: 3.0   # trigger self-fund below this
+```
 
 ---
 
