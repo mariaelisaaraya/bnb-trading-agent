@@ -67,7 +67,7 @@ This agent introduces a **deterministic 5-stage security pipeline** that interce
 
 ## x402 — autonomous self-funding
 
-The agent uses [Binance x402](https://github.com/bnb-chain/x402) to pay for services autonomously. No human top-up needed between sessions.
+The agent uses [x402](https://github.com/x402-foundation/x402) to pay for services autonomously. No human top-up needed between sessions.
 
 ```
 Agent balance: $2.40 (below $3.00 threshold)
