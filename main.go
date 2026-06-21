@@ -169,7 +169,29 @@ func newVersionCmd() *cobra.Command {
 
 // RunDemo simulates the guard pipeline with realistic attack scenarios.
 func RunDemo() error {
-	fmt.Printf("\nBNB Trading Agent — Guard Pipeline Demo\n")
+	fmt.Println(`
+╔══════════════════════════════════════════════════╗
+║                                                  ║
+║   ██████╗ ███╗   ██╗██████╗                      ║
+║   ██╔══██╗████╗  ██║██╔══██╗                     ║
+║   ██████╔╝██╔██╗ ██║██████╔╝                     ║
+║   ██╔══██╗██║╚██╗██║██╔══██╗                     ║
+║   ██████╔╝██║ ╚████║██████╔╝                     ║
+║   ╚═════╝ ╚═╝  ╚═══╝╚═════╝                      ║
+║                                                  ║
+║   █████╗  ██████╗ ███████╗███╗   ██╗████████╗   ║
+║  ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝   ║
+║  ███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║      ║
+║  ██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║      ║
+║  ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║      ║
+║  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝      ║
+║                                                  ║
+║   autonomous trading · BSC mainnet · x402        ║
+║   5-stage security pipeline · self-custody       ║
+║                                                  ║
+╚══════════════════════════════════════════════════╝`)
+	fmt.Println()
+	fmt.Printf("Guard Pipeline Demo\n")
 	fmt.Println("═══════════════════════════════════════════════════════")
 	fmt.Println()
 
