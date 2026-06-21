@@ -50,7 +50,6 @@ func (x *X402Client) Pay(serviceURL string, amount float64, asset string) (*X402
 		"--amount", fmt.Sprintf("%.4f", amount),
 		"--asset", asset,
 		"--chain", "bsc",
-		"--password", x.twak.cfg.Password,
 		"--json",
 	)
 	if err != nil {
