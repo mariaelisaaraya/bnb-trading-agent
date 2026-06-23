@@ -12,16 +12,40 @@ type Signal struct {
 	Confidence float64 // 0.0 - 1.0
 }
 
+// TokenConfig identifies a single tradeable token.
+type TokenConfig struct {
+	Symbol         string  `yaml:"symbol"`           // CMC symbol for market data (e.g. "CAKE")
+	Contract       string  `yaml:"contract"`         // BEP-20 contract address for TWAK swaps
+	TradeAmountUSD float64 `yaml:"trade_amount_usd"` // per-trade size in USD (overrides global)
+}
+
 // StrategyConfig controls the Fear & Greed + trend strategy parameters.
 type StrategyConfig struct {
-	Token            string  `yaml:"token"`          // CMC symbol (e.g. "CAKE")
-	TokenContract    string  `yaml:"token_contract"` // BEP-20 contract for TWAK swaps (optional)
+	// Legacy single-token fields (kept for backward compatibility).
+	Token            string  `yaml:"token"`
+	TokenContract    string  `yaml:"token_contract"`
 	TradeAmountUSD   float64 `yaml:"trade_amount_usd"`
+	// Thresholds shared across all tokens.
 	FGBuyThreshold   int     `yaml:"fg_buy_threshold"`
 	FGSellThreshold  int     `yaml:"fg_sell_threshold"`
 	TrendBuyMinPct   float64 `yaml:"trend_buy_min_pct"`
 	TrendSellMaxPct  float64 `yaml:"trend_sell_max_pct"`
 	TrendBuy7dMinPct float64 `yaml:"trend_buy_7d_min_pct"`
+	// Multi-token list. If set, overrides the single-token fields above.
+	Tokens []TokenConfig `yaml:"tokens"`
+}
+
+// ActiveTokens returns the list of tokens to trade, supporting both the
+// legacy single-token config and the new multi-token list.
+func (s StrategyConfig) ActiveTokens() []TokenConfig {
+	if len(s.Tokens) > 0 {
+		return s.Tokens
+	}
+	return []TokenConfig{{
+		Symbol:         s.Token,
+		Contract:       s.TokenContract,
+		TradeAmountUSD: s.TradeAmountUSD,
+	}}
 }
 
 // DefaultStrategyConfig returns conservative defaults for the competition.

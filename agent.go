@@ -65,12 +65,44 @@ func (a *Agent) RunOnce(verbose bool) error {
 
 func (a *Agent) iterate(verbose bool) error {
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
-	fmt.Printf("[%s] Evaluating %s...\n", now, a.cfg.Strategy.Token)
 
-	// Step 1: Fetch market data.
-	data, err := a.cmc.FetchMarketData(a.cfg.Strategy.Token)
+	// Step 1: Fetch wallet balance once for all tokens.
+	walletBal, err := a.twak.GetBalance()
 	if err != nil {
-		return fmt.Errorf("fetch market data: %w", err)
+		fmt.Printf("[warn] could not fetch portfolio balance: %v\n", err)
+	}
+	portfolioUSD := walletBal.TotalUSD
+
+	if receipt, fundErr := a.x402.SelfFund(portfolioUSD); fundErr != nil {
+		fmt.Printf("[warn] x402 self-fund: %v\n", fundErr)
+	} else if receipt != nil {
+		fmt.Printf("x402: funded %.4f %s (tx: %s)\n", receipt.Amount, receipt.Asset, receipt.TxHash)
+	}
+
+	// Step 2: Open trade guard once (shared across all tokens this cycle).
+	guard, err := NewTradeGuard(a.configDir)
+	if err != nil {
+		return fmt.Errorf("init trade guard: %w", err)
+	}
+	defer guard.Close()
+	if portfolioUSD > 0 {
+		guard.UpdatePortfolio(portfolioUSD)
+	}
+
+	// Step 3: Evaluate and trade each token independently.
+	for _, tok := range a.cfg.Strategy.ActiveTokens() {
+		a.evaluateToken(now, tok, walletBal, guard, verbose)
+	}
+	return nil
+}
+
+func (a *Agent) evaluateToken(now string, tok TokenConfig, walletBal WalletBalance, guard *TradeGuard, verbose bool) {
+	fmt.Printf("[%s] Evaluating %s...\n", now, tok.Symbol)
+
+	data, err := a.cmc.FetchMarketData(tok.Symbol)
+	if err != nil {
+		fmt.Printf("  [error] fetch market data: %v\n", err)
+		return
 	}
 
 	if verbose {
@@ -80,99 +112,70 @@ func (a *Agent) iterate(verbose bool) error {
 		fmt.Printf("  F&G:       %d (%s)\n", data.FearGreedValue, data.FearGreedLabel)
 	}
 
-	// Step 2: Run strategy.
-	signal := Evaluate(data, a.cfg.Strategy)
+	// Use per-token trade amount if set, otherwise fall back to global.
+	cfg := a.cfg.Strategy
+	if tok.TradeAmountUSD > 0 {
+		cfg.Token = tok.Symbol
+		cfg.TokenContract = tok.Contract
+		cfg.TradeAmountUSD = tok.TradeAmountUSD
+	}
+
+	signal := Evaluate(data, cfg)
 	fmt.Printf("  Signal:    %s — %s\n", signal.Action, signal.Reason)
 
 	if signal.Action == "hold" {
-		return nil
+		return
 	}
 
-	// Step 3: Update portfolio value and x402 self-fund if balance is low.
-	walletBal, err := a.twak.GetBalance()
-	if err != nil {
-		fmt.Printf("  [warn] could not fetch portfolio balance: %v — using last known\n", err)
-	}
-	portfolioUSD := walletBal.TotalUSD
-	if receipt, fundErr := a.x402.SelfFund(portfolioUSD); fundErr != nil {
-		fmt.Printf("  [warn] x402 self-fund: %v\n", fundErr)
-	} else if receipt != nil {
-		fmt.Printf("  x402:      funded %.4f %s (tx: %s)\n", receipt.Amount, receipt.Asset, receipt.TxHash)
-	}
-
-	// Adjust trade amount to what's actually available (leave 10% for gas/slippage).
-	// For BEP-20 tokens (token_contract set), twak doesn't expose their USD balance,
-	// so we skip the preemptive sell check and let twak handle insufficient-balance errors.
-	// For buy, we always know the USDT balance accurately.
+	// Adjust trade amount to available balance.
 	available := signal.AmountUSD
-	isBEP20 := a.cfg.Strategy.TokenContract != ""
-	if signal.Action == "sell" && !isBEP20 {
-		if walletBal.BNBUSD < signal.AmountUSD {
-			available = walletBal.BNBUSD * 0.90
-		}
-	} else if signal.Action == "buy" {
+	if signal.Action == "buy" {
 		if walletBal.USDTUSD < signal.AmountUSD {
 			available = walletBal.USDTUSD * 0.90
 		}
 	}
 	if available < 1.0 {
-		fmt.Printf("  Skip:      insufficient balance for %s (available $%.2f < $1.00)\n",
-			signal.Action, available)
-		return nil
+		fmt.Printf("  Skip:      insufficient USDT for buy (available $%.2f < $1.00)\n", available)
+		return
 	}
 
-	// Step 4: Run trade guard pipeline.
+	// Run guard pipeline.
 	tradeID := fmt.Sprintf("trade_%d", time.Now().UnixNano())
 	decision := TradeDecision{
-		Token:     signal.Token,
+		Token:     tok.Symbol,
 		Direction: signal.Action,
 		AmountUSD: available,
 		Price:     signal.Price,
 		Reason:    signal.Reason,
 	}
 
-	guard, err := NewTradeGuard(a.configDir)
-	if err != nil {
-		return fmt.Errorf("init trade guard: %w", err)
-	}
-	defer guard.Close()
-
-	if portfolioUSD > 0 {
-		guard.UpdatePortfolio(portfolioUSD)
-	}
-
 	guardResult := guard.Run(tradeID, decision)
 	fmt.Printf("  Guard:     %s [%s]\n", guardResult.Decision, joinStages(guardResult))
-
 	if guardResult.Decision == "block" {
 		fmt.Printf("  Blocked:   %s\n", guardResult.Reason)
-		return nil
+		return
 	}
 
-	// Step 5: Execute trade via TWAK.
-	// Use contract address for TWAK if configured (required for tokens TWAK
-	// doesn't recognize by symbol, e.g. CAKE needs its BEP-20 contract).
-	twakToken := signal.Token
-	if a.cfg.Strategy.TokenContract != "" {
-		twakToken = a.cfg.Strategy.TokenContract
+	// Execute via TWAK — use contract address when available.
+	twakToken := tok.Symbol
+	if tok.Contract != "" {
+		twakToken = tok.Contract
 	}
 	var receipt *TradeReceipt
 	switch signal.Action {
 	case "buy":
-		receipt, err = a.twak.ExecuteBuy(twakToken, signal.AmountUSD, signal.Price)
+		receipt, err = a.twak.ExecuteBuy(twakToken, available, signal.Price)
 	case "sell":
-		receipt, err = a.twak.ExecuteSell(twakToken, signal.AmountUSD, signal.Price)
+		receipt, err = a.twak.ExecuteSell(twakToken, available, signal.Price)
 	}
 	if err != nil {
-		return fmt.Errorf("execute trade: %w", err)
+		fmt.Printf("  [error] execute trade: %v\n", err)
+		return
 	}
 
 	fmt.Printf("  Executed:  %s $%.2f %s @ $%.4f\n",
-		receipt.Direction, receipt.AmountUSD, receipt.Token, receipt.Price)
+		receipt.Direction, receipt.AmountUSD, tok.Symbol, receipt.Price)
 	fmt.Printf("  TxHash:    %s\n", receipt.TxHash)
-	fmt.Printf("  Gas:       $%.4f\n", receipt.GasUSD)
-
-	return nil
 }
 
 func modeLabel(dryRun bool) string {
