@@ -101,8 +101,12 @@ func (a *Agent) iterate(verbose bool) error {
 	}
 
 	// Adjust trade amount to what's actually available (leave 10% for gas/slippage).
+	// For BEP-20 tokens (token_contract set), twak doesn't expose their USD balance,
+	// so we skip the preemptive sell check and let twak handle insufficient-balance errors.
+	// For buy, we always know the USDT balance accurately.
 	available := signal.AmountUSD
-	if signal.Action == "sell" {
+	isBEP20 := a.cfg.Strategy.TokenContract != ""
+	if signal.Action == "sell" && !isBEP20 {
 		if walletBal.BNBUSD < signal.AmountUSD {
 			available = walletBal.BNBUSD * 0.90
 		}
@@ -146,12 +150,18 @@ func (a *Agent) iterate(verbose bool) error {
 	}
 
 	// Step 5: Execute trade via TWAK.
+	// Use contract address for TWAK if configured (required for tokens TWAK
+	// doesn't recognize by symbol, e.g. CAKE needs its BEP-20 contract).
+	twakToken := signal.Token
+	if a.cfg.Strategy.TokenContract != "" {
+		twakToken = a.cfg.Strategy.TokenContract
+	}
 	var receipt *TradeReceipt
 	switch signal.Action {
 	case "buy":
-		receipt, err = a.twak.ExecuteBuy(signal.Token, signal.AmountUSD, signal.Price)
+		receipt, err = a.twak.ExecuteBuy(twakToken, signal.AmountUSD, signal.Price)
 	case "sell":
-		receipt, err = a.twak.ExecuteSell(signal.Token, signal.AmountUSD, signal.Price)
+		receipt, err = a.twak.ExecuteSell(twakToken, signal.AmountUSD, signal.Price)
 	}
 	if err != nil {
 		return fmt.Errorf("execute trade: %w", err)

@@ -14,13 +14,14 @@ type Signal struct {
 
 // StrategyConfig controls the Fear & Greed + trend strategy parameters.
 type StrategyConfig struct {
-	Token            string  `yaml:"token"`
+	Token            string  `yaml:"token"`          // CMC symbol (e.g. "CAKE")
+	TokenContract    string  `yaml:"token_contract"` // BEP-20 contract for TWAK swaps (optional)
 	TradeAmountUSD   float64 `yaml:"trade_amount_usd"`
-	FGBuyThreshold   int     `yaml:"fg_buy_threshold"`    // buy when F&G >= this
-	FGSellThreshold  int     `yaml:"fg_sell_threshold"`   // sell when F&G <= this
-	TrendBuyMinPct   float64 `yaml:"trend_buy_min_pct"`   // 24h change must be >= this to buy
-	TrendSellMaxPct  float64 `yaml:"trend_sell_max_pct"`  // 24h change <= this triggers sell
-	TrendBuy7dMinPct float64 `yaml:"trend_buy_7d_min_pct"` // 7d change floor for buy (-20 = disabled)
+	FGBuyThreshold   int     `yaml:"fg_buy_threshold"`
+	FGSellThreshold  int     `yaml:"fg_sell_threshold"`
+	TrendBuyMinPct   float64 `yaml:"trend_buy_min_pct"`
+	TrendSellMaxPct  float64 `yaml:"trend_sell_max_pct"`
+	TrendBuy7dMinPct float64 `yaml:"trend_buy_7d_min_pct"`
 }
 
 // DefaultStrategyConfig returns conservative defaults for the competition.
