@@ -102,7 +102,53 @@ func (a *Agent) iterate(verbose bool) error {
 	if totalPortfolio > 0 {
 		guard.UpdatePortfolio(totalPortfolio)
 	}
+
+	// Step 5: Competition keep-alive — if no eligible trade in 20+ hours, execute a
+	// minimal ETH buy to maintain daily participation without significant capital risk.
+	if guard.HoursSinceLastTrade() >= 20.0 && walletBal.USDTUSD >= 2.0 {
+		a.keepAliveBuy(now, walletBal, guard, verbose)
+	}
+
 	return nil
+}
+
+func (a *Agent) keepAliveBuy(now string, walletBal WalletBalance, guard *TradeGuard, verbose bool) {
+	ethTok := TokenConfig{
+		Symbol:         "ETH",
+		Contract:       "0x2170ed0880ac9a755fd29b2688956bd959f933f8",
+		TradeAmountUSD: 1.50,
+	}
+	fmt.Printf("[%s] Keep-alive: no trade in 20h — buying $1.50 ETH\n", now)
+
+	data, err := a.cmc.FetchMarketData("ETH")
+	if err != nil {
+		fmt.Printf("  [keep-alive] fetch ETH price: %v\n", err)
+		return
+	}
+
+	tradeID := fmt.Sprintf("keepalive_%d", time.Now().UnixNano())
+	decision := TradeDecision{
+		Token:     "ETH",
+		Direction: "buy",
+		AmountUSD: 1.50,
+		Price:     data.Price,
+		Reason:    "keep-alive: competition daily participation",
+	}
+	guardResult := guard.Run(tradeID, decision)
+	fmt.Printf("  Guard:     %s [%s]\n", guardResult.Decision, joinStages(guardResult))
+	if guardResult.Decision == "block" {
+		fmt.Printf("  Blocked:   %s\n", guardResult.Reason)
+		return
+	}
+
+	receipt, err := a.twak.ExecuteBuy(ethTok.Contract, 1.50, data.Price)
+	if err != nil {
+		fmt.Printf("  [keep-alive] execute: %v\n", err)
+		return
+	}
+	guard.RecordHolding("ETH", "buy", receipt.AmountUSD, receipt.Price)
+	fmt.Printf("  Executed:  buy $%.2f ETH @ $%.2f (tx: %s)\n",
+		receipt.AmountUSD, receipt.Price, receipt.TxHash)
 }
 
 // evaluateToken fetches market data, runs the strategy, and executes a trade if signalled.

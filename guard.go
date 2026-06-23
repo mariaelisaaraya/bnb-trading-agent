@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type TradeDecision struct {
@@ -158,6 +159,22 @@ func (g *TradeGuard) Close() {
 
 func (g *TradeGuard) UpdatePortfolio(currentUSD float64) {
 	g.state.UpdatePortfolio(currentUSD)
+}
+
+// HoursSinceLastTrade returns hours elapsed since the most recent executed trade.
+// Returns 999 if no trade has ever been recorded.
+func (g *TradeGuard) HoursSinceLastTrade() float64 {
+	calls := g.state.GetCalls()
+	if len(calls) == 0 {
+		return 999
+	}
+	var latest int64
+	for _, ts := range calls {
+		if ts > latest {
+			latest = ts
+		}
+	}
+	return time.Since(time.Unix(latest, 0)).Hours()
 }
 
 // HoldingValueUSD returns the USD value of the tracked position for a single token.
