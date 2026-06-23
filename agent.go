@@ -85,24 +85,35 @@ func (a *Agent) iterate(verbose bool) error {
 		return fmt.Errorf("init trade guard: %w", err)
 	}
 	defer guard.Close()
-	if portfolioUSD > 0 {
-		guard.UpdatePortfolio(portfolioUSD)
+
+	// Step 3: Evaluate each token; accumulate current prices for portfolio valuation.
+	tokenPrices := make(map[string]float64)
+	for _, tok := range a.cfg.Strategy.ActiveTokens() {
+		price := a.evaluateToken(now, tok, walletBal, guard, verbose)
+		if price > 0 {
+			tokenPrices[tok.Symbol] = price
+		}
 	}
 
-	// Step 3: Evaluate and trade each token independently.
-	for _, tok := range a.cfg.Strategy.ActiveTokens() {
-		a.evaluateToken(now, tok, walletBal, guard, verbose)
+	// Step 4: Update portfolio = liquid balance + market value of tracked holdings.
+	// walletBal.TotalUSD only covers USDT + native BNB; holdings tracks BEP-20 positions.
+	holdingsUSD := guard.EstimateHoldingsUSD(tokenPrices)
+	totalPortfolio := walletBal.TotalUSD + holdingsUSD
+	if totalPortfolio > 0 {
+		guard.UpdatePortfolio(totalPortfolio)
 	}
 	return nil
 }
 
-func (a *Agent) evaluateToken(now string, tok TokenConfig, walletBal WalletBalance, guard *TradeGuard, verbose bool) {
+// evaluateToken fetches market data, runs the strategy, and executes a trade if signalled.
+// Returns the current token price (for portfolio valuation), or 0 on error.
+func (a *Agent) evaluateToken(now string, tok TokenConfig, walletBal WalletBalance, guard *TradeGuard, verbose bool) float64 {
 	fmt.Printf("[%s] Evaluating %s...\n", now, tok.Symbol)
 
 	data, err := a.cmc.FetchMarketData(tok.Symbol)
 	if err != nil {
 		fmt.Printf("  [error] fetch market data: %v\n", err)
-		return
+		return 0
 	}
 
 	if verbose {
@@ -124,7 +135,7 @@ func (a *Agent) evaluateToken(now string, tok TokenConfig, walletBal WalletBalan
 	fmt.Printf("  Signal:    %s — %s\n", signal.Action, signal.Reason)
 
 	if signal.Action == "hold" {
-		return
+		return data.Price
 	}
 
 	// Adjust trade amount to available balance.
@@ -136,7 +147,7 @@ func (a *Agent) evaluateToken(now string, tok TokenConfig, walletBal WalletBalan
 	}
 	if available < 1.0 {
 		fmt.Printf("  Skip:      insufficient USDT for buy (available $%.2f < $1.00)\n", available)
-		return
+		return data.Price
 	}
 
 	// Run guard pipeline.
@@ -153,7 +164,7 @@ func (a *Agent) evaluateToken(now string, tok TokenConfig, walletBal WalletBalan
 	fmt.Printf("  Guard:     %s [%s]\n", guardResult.Decision, joinStages(guardResult))
 	if guardResult.Decision == "block" {
 		fmt.Printf("  Blocked:   %s\n", guardResult.Reason)
-		return
+		return data.Price
 	}
 
 	// Execute via TWAK — use contract address when available.
@@ -170,12 +181,15 @@ func (a *Agent) evaluateToken(now string, tok TokenConfig, walletBal WalletBalan
 	}
 	if err != nil {
 		fmt.Printf("  [error] execute trade: %v\n", err)
-		return
+		return data.Price
 	}
+
+	guard.RecordHolding(tok.Symbol, signal.Action, receipt.AmountUSD, receipt.Price)
 
 	fmt.Printf("  Executed:  %s $%.2f %s @ $%.4f\n",
 		receipt.Direction, receipt.AmountUSD, tok.Symbol, receipt.Price)
 	fmt.Printf("  TxHash:    %s\n", receipt.TxHash)
+	return data.Price
 }
 
 func modeLabel(dryRun bool) string {

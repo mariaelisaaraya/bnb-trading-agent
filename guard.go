@@ -160,6 +160,27 @@ func (g *TradeGuard) UpdatePortfolio(currentUSD float64) {
 	g.state.UpdatePortfolio(currentUSD)
 }
 
+// RecordHolding updates the tracked position for a token after a trade executes.
+func (g *TradeGuard) RecordHolding(token, direction string, amountUSD, price float64) {
+	switch direction {
+	case "buy":
+		g.state.RecordBuy(token, amountUSD, price)
+	case "sell":
+		g.state.RecordSell(token, amountUSD, price)
+	}
+}
+
+// EstimateHoldingsUSD returns the USD value of tracked token holdings at given prices.
+func (g *TradeGuard) EstimateHoldingsUSD(prices map[string]float64) float64 {
+	var total float64
+	for token, qty := range g.state.Holdings {
+		if price, ok := prices[token]; ok && qty > 0 {
+			total += qty * price
+		}
+	}
+	return total
+}
+
 func (g *TradeGuard) logAudit(tradeID string, d TradeDecision, result GuardResult) {
 	entry := AuditEntry{
 		TradeID:   tradeID,

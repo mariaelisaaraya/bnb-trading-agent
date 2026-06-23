@@ -11,12 +11,13 @@ import (
 // State persists trade counters, spend records, trade intents, and portfolio
 // tracking between agent loop iterations. Serialized to disk with file locking.
 type State struct {
-	Calls              map[string][]int64       `json:"calls"`
-	Spends             map[string][]SpendRecord `json:"spends"`
-	Intents            map[string]TradeIntent   `json:"intents"`
-	PeakPortfolioUSD   float64                  `json:"peak_portfolio_usd"`
-	CurrentPortfolioUSD float64                 `json:"current_portfolio_usd"`
-	TotalTradesExecuted int                     `json:"total_trades_executed"`
+	Calls               map[string][]int64       `json:"calls"`
+	Spends              map[string][]SpendRecord `json:"spends"`
+	Intents             map[string]TradeIntent   `json:"intents"`
+	Holdings            map[string]float64       `json:"holdings"` // token symbol → quantity held
+	PeakPortfolioUSD    float64                  `json:"peak_portfolio_usd"`
+	CurrentPortfolioUSD float64                  `json:"current_portfolio_usd"`
+	TotalTradesExecuted int                      `json:"total_trades_executed"`
 }
 
 const tradeStateKey = "__bnbagent_trade__"
@@ -24,9 +25,10 @@ const tradeStateKey = "__bnbagent_trade__"
 // NewState creates an empty state.
 func NewState() *State {
 	return &State{
-		Calls:   make(map[string][]int64),
-		Spends:  make(map[string][]SpendRecord),
-		Intents: make(map[string]TradeIntent),
+		Calls:    make(map[string][]int64),
+		Spends:   make(map[string][]SpendRecord),
+		Intents:  make(map[string]TradeIntent),
+		Holdings: make(map[string]float64),
 	}
 }
 
@@ -105,6 +107,28 @@ func (s *State) GetIntent(key string) *TradeIntent {
 		return nil
 	}
 	return &intent
+}
+
+// RecordBuy increases the tracked holding for a token.
+func (s *State) RecordBuy(token string, amountUSD, price float64) {
+	if price <= 0 || amountUSD <= 0 {
+		return
+	}
+	if s.Holdings == nil {
+		s.Holdings = make(map[string]float64)
+	}
+	s.Holdings[token] += amountUSD / price
+}
+
+// RecordSell decreases the tracked holding for a token (floor at zero).
+func (s *State) RecordSell(token string, amountUSD, price float64) {
+	if price <= 0 || amountUSD <= 0 || s.Holdings == nil {
+		return
+	}
+	s.Holdings[token] -= amountUSD / price
+	if s.Holdings[token] < 0 {
+		s.Holdings[token] = 0
+	}
 }
 
 // UpdatePortfolio updates the portfolio value and tracks the peak.
