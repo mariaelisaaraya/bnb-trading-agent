@@ -53,28 +53,49 @@ func (t *TWAKClient) Register() error {
 	return nil
 }
 
-// GetBalance returns the USD value of the agent wallet's portfolio on BSC.
-func (t *TWAKClient) GetBalance() (float64, error) {
+// WalletBalance holds parsed BSC wallet balances.
+type WalletBalance struct {
+	TotalUSD float64
+	BNBUSD   float64 // native BNB value in USD
+	USDTUSD  float64 // USDT token balance (1:1 USD)
+}
+
+// GetBalance returns the detailed BSC wallet balance.
+func (t *TWAKClient) GetBalance() (WalletBalance, error) {
 	if t.cfg.DryRun {
-		return 100.0, nil // mock $100 for dry-run
+		return WalletBalance{TotalUSD: 100, BNBUSD: 50, USDTUSD: 50}, nil
 	}
-	out, err := t.run("wallet", "balance", "--format", "json")
+	out, err := t.run("wallet", "balance", "--chain", "bsc", "--json")
 	if err != nil {
-		return 0, fmt.Errorf("twak wallet balance: %w", err)
+		return WalletBalance{}, fmt.Errorf("twak wallet balance: %w", err)
+	}
+
+	// twak may emit a non-JSON warning line before the JSON object; find the first '{'.
+	jsonStart := strings.Index(out, "{")
+	if jsonStart > 0 {
+		out = out[jsonStart:]
 	}
 
 	var resp struct {
-		TotalUSD float64 `json:"total_usd"`
+		TotalUSD float64 `json:"totalUsd"`
+		Tokens   []struct {
+			Symbol  string `json:"symbol"`
+			Balance string `json:"balance"`
+		} `json:"tokens"`
 	}
 	if err := json.Unmarshal([]byte(out), &resp); err != nil {
-		// Fallback: try to parse a plain float from output.
-		var v float64
-		if _, scanErr := fmt.Sscanf(strings.TrimSpace(out), "%f", &v); scanErr == nil {
-			return v, nil
-		}
-		return 0, fmt.Errorf("parse balance response: %w", err)
+		return WalletBalance{}, fmt.Errorf("parse balance response: %w", err)
 	}
-	return resp.TotalUSD, nil
+
+	// resp.TotalUSD from twak = native BNB value only (excludes ERC20 tokens).
+	bal := WalletBalance{BNBUSD: resp.TotalUSD}
+	for _, tok := range resp.Tokens {
+		if tok.Symbol == "USDT" {
+			fmt.Sscanf(tok.Balance, "%f", &bal.USDTUSD)
+		}
+	}
+	bal.TotalUSD = bal.BNBUSD + bal.USDTUSD
+	return bal, nil
 }
 
 // ExecuteBuy buys the given USD amount of token using TWAK's swap.

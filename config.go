@@ -22,7 +22,7 @@ type AgentConfig struct {
 func DefaultAgentConfig() AgentConfig {
 	return AgentConfig{
 		CMCAPIKey:            "",
-		TWAK:                 TWAKConfig{DryRun: true},
+		TWAK:                 TWAKConfig{DryRun: false},
 		X402: X402Config{
 			Enabled:        true,
 			ServiceURL:     "https://agentsvc.io/api/search",
@@ -30,7 +30,7 @@ func DefaultAgentConfig() AgentConfig {
 			MaxPaymentUSDC: 0.001,
 			MinBalanceUSD:  3.0,
 		},
-		TradeIntervalMinutes: 15,
+		TradeIntervalMinutes: 30,
 		Strategy:             DefaultStrategyConfig(),
 		Policy:               DefaultPolicy(),
 	}

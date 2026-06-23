@@ -14,23 +14,25 @@ type Signal struct {
 
 // StrategyConfig controls the Fear & Greed + trend strategy parameters.
 type StrategyConfig struct {
-	Token           string  `yaml:"token"`
-	TradeAmountUSD  float64 `yaml:"trade_amount_usd"`
-	FGBuyThreshold  int     `yaml:"fg_buy_threshold"`   // buy when F&G >= this
-	FGSellThreshold int     `yaml:"fg_sell_threshold"`  // sell when F&G <= this
-	TrendBuyMinPct  float64 `yaml:"trend_buy_min_pct"`  // 24h change must be >= this to buy
-	TrendSellMaxPct float64 `yaml:"trend_sell_max_pct"` // 24h change <= this triggers sell
+	Token            string  `yaml:"token"`
+	TradeAmountUSD   float64 `yaml:"trade_amount_usd"`
+	FGBuyThreshold   int     `yaml:"fg_buy_threshold"`    // buy when F&G >= this
+	FGSellThreshold  int     `yaml:"fg_sell_threshold"`   // sell when F&G <= this
+	TrendBuyMinPct   float64 `yaml:"trend_buy_min_pct"`   // 24h change must be >= this to buy
+	TrendSellMaxPct  float64 `yaml:"trend_sell_max_pct"`  // 24h change <= this triggers sell
+	TrendBuy7dMinPct float64 `yaml:"trend_buy_7d_min_pct"` // 7d change floor for buy (-20 = disabled)
 }
 
 // DefaultStrategyConfig returns conservative defaults for the competition.
 func DefaultStrategyConfig() StrategyConfig {
 	return StrategyConfig{
-		Token:           "BNB",
-		TradeAmountUSD:  50.0,
-		FGBuyThreshold:  55,
-		FGSellThreshold: 30,
-		TrendBuyMinPct:  1.0,
-		TrendSellMaxPct: -3.0,
+		Token:            "BNB",
+		TradeAmountUSD:   50.0,
+		FGBuyThreshold:   55,
+		FGSellThreshold:  30,
+		TrendBuyMinPct:   1.0,
+		TrendSellMaxPct:  -3.0,
+		TrendBuy7dMinPct: -20.0,
 	}
 }
 
@@ -89,7 +91,7 @@ func Evaluate(data *MarketData, cfg StrategyConfig) Signal {
 	// Buy signals: all conditions must be true.
 	fgBuyOk := data.FearGreedValue >= cfg.FGBuyThreshold
 	trendOk := data.Change24h >= cfg.TrendBuyMinPct
-	weekOk := data.Change7d >= 0
+	weekOk := data.Change7d >= cfg.TrendBuy7dMinPct
 
 	if fgBuyOk && trendOk && weekOk {
 		conf := (confidence(data.FearGreedValue-cfg.FGBuyThreshold, 45) +

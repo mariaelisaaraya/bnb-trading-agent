@@ -89,14 +89,32 @@ func (a *Agent) iterate(verbose bool) error {
 	}
 
 	// Step 3: Update portfolio value and x402 self-fund if balance is low.
-	portfolioUSD, err := a.twak.GetBalance()
+	walletBal, err := a.twak.GetBalance()
 	if err != nil {
 		fmt.Printf("  [warn] could not fetch portfolio balance: %v — using last known\n", err)
 	}
+	portfolioUSD := walletBal.TotalUSD
 	if receipt, fundErr := a.x402.SelfFund(portfolioUSD); fundErr != nil {
 		fmt.Printf("  [warn] x402 self-fund: %v\n", fundErr)
 	} else if receipt != nil {
 		fmt.Printf("  x402:      funded %.4f %s (tx: %s)\n", receipt.Amount, receipt.Asset, receipt.TxHash)
+	}
+
+	// Adjust trade amount to what's actually available (leave 10% for gas/slippage).
+	available := signal.AmountUSD
+	if signal.Action == "sell" {
+		if walletBal.BNBUSD < signal.AmountUSD {
+			available = walletBal.BNBUSD * 0.90
+		}
+	} else if signal.Action == "buy" {
+		if walletBal.USDTUSD < signal.AmountUSD {
+			available = walletBal.USDTUSD * 0.90
+		}
+	}
+	if available < 1.0 {
+		fmt.Printf("  Skip:      insufficient balance for %s (available $%.2f < $1.00)\n",
+			signal.Action, available)
+		return nil
 	}
 
 	// Step 4: Run trade guard pipeline.
@@ -104,7 +122,7 @@ func (a *Agent) iterate(verbose bool) error {
 	decision := TradeDecision{
 		Token:     signal.Token,
 		Direction: signal.Action,
-		AmountUSD: signal.AmountUSD,
+		AmountUSD: available,
 		Price:     signal.Price,
 		Reason:    signal.Reason,
 	}
