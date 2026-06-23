@@ -144,10 +144,20 @@ func (a *Agent) evaluateToken(now string, tok TokenConfig, walletBal WalletBalan
 		if walletBal.USDTUSD < signal.AmountUSD {
 			available = walletBal.USDTUSD * 0.90
 		}
+		if available < 1.0 {
+			fmt.Printf("  Skip:      insufficient USDT for buy (available $%.2f < $1.00)\n", available)
+			return data.Price
+		}
 	}
-	if available < 1.0 {
-		fmt.Printf("  Skip:      insufficient USDT for buy (available $%.2f < $1.00)\n", available)
-		return data.Price
+	if signal.Action == "sell" {
+		holdingsUSD := guard.HoldingValueUSD(tok.Symbol, data.Price)
+		if holdingsUSD < 0.25 {
+			fmt.Printf("  Skip:      no %s position to sell (holdings ~$%.2f)\n", tok.Symbol, holdingsUSD)
+			return data.Price
+		}
+		if holdingsUSD < signal.AmountUSD {
+			available = holdingsUSD * 0.95
+		}
 	}
 
 	// Run guard pipeline.

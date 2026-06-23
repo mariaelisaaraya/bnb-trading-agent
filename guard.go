@@ -160,6 +160,18 @@ func (g *TradeGuard) UpdatePortfolio(currentUSD float64) {
 	g.state.UpdatePortfolio(currentUSD)
 }
 
+// HoldingValueUSD returns the USD value of the tracked position for a single token.
+func (g *TradeGuard) HoldingValueUSD(token string, price float64) float64 {
+	if g.state.Holdings == nil || price <= 0 {
+		return 0
+	}
+	qty := g.state.Holdings[token]
+	if qty <= 0 {
+		return 0
+	}
+	return qty * price
+}
+
 // RecordHolding updates the tracked position for a token after a trade executes.
 func (g *TradeGuard) RecordHolding(token, direction string, amountUSD, price float64) {
 	switch direction {
