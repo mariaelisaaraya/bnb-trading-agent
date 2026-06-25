@@ -61,18 +61,16 @@ func DefaultStrategyConfig() StrategyConfig {
 	}
 }
 
-// Evaluate runs the Fear & Greed + momentum strategy against market data.
+// Evaluate runs the multi-signal trading strategy against market data.
 //
-// BUY conditions (all must be true):
-//   - Fear & Greed >= FGBuyThreshold (market is greedy = momentum)
-//   - 24h price change >= TrendBuyMinPct (positive short-term trend)
-//   - 7d price change >= 0 (positive medium-term trend)
+// SELL conditions (any is sufficient, checked first):
+//   - Fear & Greed <= FGSellThreshold (extreme fear hard exit)
+//   - 24h price change <= TrendSellMaxPct (sharp drop stop-loss)
 //
-// SELL conditions (any is sufficient):
-//   - Fear & Greed <= FGSellThreshold (extreme fear = exit)
-//   - 24h price change <= TrendSellMaxPct (sharp drop = stop loss)
-//
-// HOLD otherwise.
+// BUY conditions — composite score if TA available, else F&G+trend fallback:
+//   With EMA/RSI: composite score (EMA 40%, RSI 30%, F&G 20%, 24h 10%) >= 0.25
+//                 OR RSI < 30 (oversold) with score > -0.15 (contrarian entry)
+//   Without TA:  F&G >= FGBuyThreshold + 24h >= TrendBuyMinPct + 7d >= 7dMinPct
 func Evaluate(data *MarketData, cfg StrategyConfig) Signal {
 	token := cfg.Token
 	if data.Symbol != token {
@@ -84,7 +82,7 @@ func Evaluate(data *MarketData, cfg StrategyConfig) Signal {
 		}
 	}
 
-	// Sell signals take priority.
+	// Hard sell: extreme fear exit.
 	if data.FearGreedValue <= cfg.FGSellThreshold {
 		return Signal{
 			Action:     "sell",
@@ -99,6 +97,7 @@ func Evaluate(data *MarketData, cfg StrategyConfig) Signal {
 		}
 	}
 
+	// Hard sell: sharp 24h drop stop-loss.
 	if data.Change24h <= cfg.TrendSellMaxPct {
 		return Signal{
 			Action:     "sell",
@@ -113,7 +112,57 @@ func Evaluate(data *MarketData, cfg StrategyConfig) Signal {
 		}
 	}
 
-	// Buy signals: all conditions must be true.
+	// Technical analysis path: EMA + RSI composite score.
+	if data.EMA7 > 0 && data.EMA30 > 0 {
+		score := CompositeScore(data.EMA7, data.EMA30, data.RSI14, data.FearGreedValue, data.Change24h)
+		emaTrend := "↓ bear"
+		if data.EMA7 > data.EMA30 {
+			emaTrend = "↑ bull"
+		}
+
+		// Trend-following buy: EMA uptrend + strong composite score.
+		if data.EMA7 > data.EMA30 && score >= 0.25 {
+			return Signal{
+				Action:     "buy",
+				Token:      token,
+				AmountUSD:  cfg.TradeAmountUSD,
+				Price:      data.Price,
+				Confidence: score,
+				Reason: fmt.Sprintf(
+					"TA buy: score=%.2f, EMA %s, RSI=%.1f, F&G=%d",
+					score, emaTrend, data.RSI14, data.FearGreedValue,
+				),
+			}
+		}
+
+		// Contrarian buy: RSI oversold — buy the dip even in mild downtrend.
+		// Threshold -0.30 captures extreme oversold (RSI < 30) even with EMA bearish.
+		if data.RSI14 > 0 && data.RSI14 < 30 && score > -0.30 {
+			return Signal{
+				Action:     "buy",
+				Token:      token,
+				AmountUSD:  cfg.TradeAmountUSD,
+				Price:      data.Price,
+				Confidence: (30 - data.RSI14) / 30,
+				Reason: fmt.Sprintf(
+					"oversold buy: RSI=%.1f < 30, score=%.2f, EMA %s",
+					data.RSI14, score, emaTrend,
+				),
+			}
+		}
+
+		return Signal{
+			Action: "hold",
+			Token:  token,
+			Price:  data.Price,
+			Reason: fmt.Sprintf(
+				"hold: score=%.2f (need ≥0.25), EMA %s, RSI=%.1f, F&G=%d",
+				score, emaTrend, data.RSI14, data.FearGreedValue,
+			),
+		}
+	}
+
+	// Fallback: original F&G + trend logic (no TA available).
 	fgBuyOk := data.FearGreedValue >= cfg.FGBuyThreshold
 	trendOk := data.Change24h >= cfg.TrendBuyMinPct
 	weekOk := data.Change7d >= cfg.TrendBuy7dMinPct
@@ -134,18 +183,15 @@ func Evaluate(data *MarketData, cfg StrategyConfig) Signal {
 		}
 	}
 
-	// Build a human-readable hold reason.
-	holdReason := fmt.Sprintf(
-		"hold: F&G=%d, 24h=%.2f%%, 7d=%.2f%% — buy needs F&G>=%d + 24h>=%.1f%% + 7d>=0",
-		data.FearGreedValue, data.Change24h, data.Change7d,
-		cfg.FGBuyThreshold, cfg.TrendBuyMinPct,
-	)
-
 	return Signal{
 		Action: "hold",
 		Token:  token,
 		Price:  data.Price,
-		Reason: holdReason,
+		Reason: fmt.Sprintf(
+			"hold: F&G=%d, 24h=%.2f%%, 7d=%.2f%% — buy needs F&G>=%d + 24h>=%.1f%% + 7d>=%.1f%%",
+			data.FearGreedValue, data.Change24h, data.Change7d,
+			cfg.FGBuyThreshold, cfg.TrendBuyMinPct, cfg.TrendBuy7dMinPct,
+		),
 	}
 }
 

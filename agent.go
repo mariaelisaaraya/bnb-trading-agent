@@ -146,7 +146,9 @@ func (a *Agent) keepAliveBuy(now string, walletBal WalletBalance, guard *TradeGu
 		fmt.Printf("  [keep-alive] execute: %v\n", err)
 		return
 	}
-	guard.RecordHolding("ETH", "buy", receipt.AmountUSD, receipt.Price)
+	// Intentionally do NOT RecordHolding here: keep-alive buys are for
+	// daily competition eligibility only. Tracking the position would
+	// trigger an immediate sell signal on the next cycle when F&G is low.
 	fmt.Printf("  Executed:  buy $%.2f ETH @ $%.2f (tx: %s)\n",
 		receipt.AmountUSD, receipt.Price, receipt.TxHash)
 }
@@ -162,11 +164,26 @@ func (a *Agent) evaluateToken(now string, tok TokenConfig, walletBal WalletBalan
 		return 0
 	}
 
+	// Fetch price history and compute technical indicators.
+	if prices, err := a.twak.GetPriceHistory(tok.Symbol); err == nil && len(prices) >= 30 {
+		data.EMA7 = EMA(prices, 7)
+		data.EMA30 = EMA(prices, 30)
+		data.RSI14 = RSI(prices, 14)
+	}
+
 	if verbose {
 		fmt.Printf("  Price:     $%.4f\n", data.Price)
 		fmt.Printf("  24h:       %+.2f%%\n", data.Change24h)
 		fmt.Printf("  7d:        %+.2f%%\n", data.Change7d)
 		fmt.Printf("  F&G:       %d (%s)\n", data.FearGreedValue, data.FearGreedLabel)
+		if data.EMA7 > 0 {
+			trend := "↑ bull"
+			if data.EMA7 < data.EMA30 {
+				trend = "↓ bear"
+			}
+			fmt.Printf("  EMA7/30:   $%.2f / $%.2f (%s)\n", data.EMA7, data.EMA30, trend)
+			fmt.Printf("  RSI-14:    %.1f\n", data.RSI14)
+		}
 	}
 
 	// Use per-token trade amount if set, otherwise fall back to global.

@@ -158,6 +158,43 @@ func (t *TWAKClient) ExecuteSell(token string, amountUSD float64, expectedPrice 
 	return parseTWAKReceipt(out, token, "sell", amountUSD, expectedPrice)
 }
 
+// GetPriceHistory returns closing prices for the past week via TWAK.
+// Prices are in chronological order (oldest first).
+func (t *TWAKClient) GetPriceHistory(symbol string) ([]float64, error) {
+	if t.cfg.DryRun {
+		prices := make([]float64, 57)
+		for i := range prices {
+			prices[i] = 100.0
+		}
+		return prices, nil
+	}
+
+	out, err := t.run("price", symbol, "--history", "week", "--json")
+	if err != nil {
+		return nil, fmt.Errorf("twak price history %s: %w", symbol, err)
+	}
+
+	// TWAK may emit a non-JSON prefix; find the first '{'.
+	if idx := strings.Index(out, "{"); idx > 0 {
+		out = out[idx:]
+	}
+
+	var resp struct {
+		History []struct {
+			Price float64 `json:"price"`
+		} `json:"history"`
+	}
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		return nil, fmt.Errorf("parse price history: %w", err)
+	}
+
+	prices := make([]float64, len(resp.History))
+	for i, h := range resp.History {
+		prices[i] = h.Price
+	}
+	return prices, nil
+}
+
 func (t *TWAKClient) run(args ...string) (string, error) {
 	cmd := exec.Command("twak", args...)
 	var stdout, stderr bytes.Buffer

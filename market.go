@@ -21,6 +21,10 @@ type MarketData struct {
 	FearGreedValue int      // 0-100
 	FearGreedLabel string   // "Extreme Fear", "Fear", "Neutral", "Greed", "Extreme Greed"
 	FetchedAt      time.Time
+	// Technical indicators — populated from TWAK price history; 0 means unavailable.
+	EMA7  float64 // 7-period EMA (short-term trend)
+	EMA30 float64 // 30-period EMA (medium-term trend)
+	RSI14 float64 // 14-period RSI, 0-100 (50 = neutral if unavailable)
 }
 
 // CMCClient calls the CoinMarketCap Pro API.
