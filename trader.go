@@ -117,7 +117,7 @@ func (t *TWAKClient) ExecuteBuy(token string, amountUSD float64, expectedPrice f
 		"swap", "USDT", token,
 		"--usd", fmt.Sprintf("%.2f", amountUSD),
 		"--chain", "bsc",
-		"--slippage", "2",
+		"--slippage", "5",
 		"--password", t.cfg.Password,
 		"--json",
 	)
@@ -147,7 +147,7 @@ func (t *TWAKClient) ExecuteSell(token string, amountUSD float64, expectedPrice 
 		"swap", token, "USDT",
 		"--usd", fmt.Sprintf("%.2f", amountUSD),
 		"--chain", "bsc",
-		"--slippage", "2",
+		"--slippage", "5",
 		"--password", t.cfg.Password,
 		"--json",
 	)
