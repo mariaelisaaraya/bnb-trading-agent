@@ -22,6 +22,9 @@ func main() {
 	root.AddCommand(
 		newRunCmd(),
 		newRegisterCmd(),
+		newIdentityCmd(),
+		newHaltCmd(),
+		newResumeCmd(),
 		newAuditCmd(),
 		newDemoCmd(),
 		newInitCmd(),
@@ -83,7 +86,7 @@ security pipeline, and executes via Trust Wallet Agent Kit.`,
 
 func newRegisterCmd() *cobra.Command {
 	var configDir string
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "register",
 		Short: "Register agent wallet in the BSC competition contract",
 		Long:  "Calls `twak compete register` to submit the agent's wallet address to the on-chain participant list.",
@@ -99,6 +102,85 @@ func newRegisterCmd() *cobra.Command {
 			return client.Register()
 		},
 	}
+	cmd.Flags().StringVar(&configDir, "config-dir", "", "config directory")
+	return cmd
+}
+
+func newIdentityCmd() *cobra.Command {
+	var configDir string
+	cmd := &cobra.Command{
+		Use:   "identity",
+		Short: "Generate the ERC-8004 agent card for on-chain identity registration",
+		Long: `Writes agent-card.json (the ERC-8004 agentURI document) to the config dir
+and prints the IdentityRegistry addresses on BSC to register the agent as a
+verifiable on-chain identity (see 8004scan.io).`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if configDir == "" {
+				configDir = DefaultConfigDir()
+			}
+			if err := EnsureConfigDir(configDir); err != nil {
+				return err
+			}
+			cfg, err := LoadConfig(filepath.Join(configDir, "config.yaml"))
+			if err != nil {
+				return err
+			}
+			cardPath, err := WriteAgentCard(configDir, cfg)
+			if err != nil {
+				return err
+			}
+			PrintIdentityInstructions(cardPath, cfg)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&configDir, "config-dir", "", "config directory")
+	return cmd
+}
+
+func newHaltCmd() *cobra.Command {
+	var configDir string
+	cmd := &cobra.Command{
+		Use:   "halt",
+		Short: "Engage the circuit breaker — block all trades immediately",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if configDir == "" {
+				configDir = DefaultConfigDir()
+			}
+			haltPath := filepath.Join(configDir, HaltFileName)
+			if err := os.WriteFile(haltPath, []byte("engaged by `bnb-agent halt`\n"), 0600); err != nil {
+				return fmt.Errorf("engage circuit breaker: %w", err)
+			}
+			fmt.Printf("Circuit breaker ENGAGED — all trades blocked.\nRe-enable with: bnb-agent resume\n")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&configDir, "config-dir", "", "config directory")
+	return cmd
+}
+
+func newResumeCmd() *cobra.Command {
+	var configDir string
+	cmd := &cobra.Command{
+		Use:   "resume",
+		Short: "Release the circuit breaker — re-enable trading",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if configDir == "" {
+				configDir = DefaultConfigDir()
+			}
+			haltPath := filepath.Join(configDir, HaltFileName)
+			if err := os.Remove(haltPath); err != nil {
+				if os.IsNotExist(err) {
+					fmt.Println("Circuit breaker was not engaged — nothing to do.")
+					return nil
+				}
+				return fmt.Errorf("release circuit breaker: %w", err)
+			}
+			fmt.Println("Circuit breaker released — trading re-enabled.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&configDir, "config-dir", "", "config directory")
+	return cmd
 }
 
 func newAuditCmd() *cobra.Command {
@@ -133,7 +215,7 @@ func newDemoCmd() *cobra.Command {
 
 func newInitCmd() *cobra.Command {
 	var configDir string
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize config directory with default files",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -151,10 +233,13 @@ func newInitCmd() *cobra.Command {
 			fmt.Printf("  1. Edit %s/config.yaml — set cmc_api_key and twak.wallet_address\n", configDir)
 			fmt.Println("  2. bnb-agent register  — register on BSC competition contract")
 			fmt.Println("  3. bnb-agent run --dry-run  — test without real trades")
-			fmt.Println("  4. bnb-agent run  — go live\n")
+			fmt.Println("  4. bnb-agent run  — go live")
+			fmt.Println()
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&configDir, "config-dir", "", "config directory")
+	return cmd
 }
 
 func newVersionCmd() *cobra.Command {

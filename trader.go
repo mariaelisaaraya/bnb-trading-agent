@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -22,9 +24,10 @@ type TradeReceipt struct {
 
 // TWAKConfig holds Trust Wallet Agent Kit connection settings.
 type TWAKConfig struct {
-	WalletAddress string `yaml:"wallet_address"`
-	Password      string `yaml:"password"`  // wallet encryption password
-	DryRun        bool   `yaml:"dry_run"`   // if true, log trades without executing
+	WalletAddress string  `yaml:"wallet_address"`
+	Password      string  `yaml:"password"`     // wallet encryption password; prefer TWAK_PASSWORD env var
+	DryRun        bool    `yaml:"dry_run"`      // if true, log trades without executing
+	SlippagePct   float64 `yaml:"slippage_pct"` // swap slippage tolerance in percent (default 5)
 }
 
 // TWAKClient wraps the TWAK CLI for local self-custody signing.
@@ -33,9 +36,21 @@ type TWAKClient struct {
 	cfg TWAKConfig
 }
 
-// NewTWAKClient creates a TWAK client.
+// NewTWAKClient creates a TWAK client. The wallet password can be supplied
+// via the TWAK_PASSWORD env var so it never has to live in config.yaml.
 func NewTWAKClient(cfg TWAKConfig) *TWAKClient {
+	if env := os.Getenv("TWAK_PASSWORD"); env != "" {
+		cfg.Password = env
+	}
+	if cfg.SlippagePct <= 0 {
+		cfg.SlippagePct = 5
+	}
 	return &TWAKClient{cfg: cfg}
+}
+
+// slippageArg formats the configured slippage for the twak CLI.
+func (t *TWAKClient) slippageArg() string {
+	return strconv.FormatFloat(t.cfg.SlippagePct, 'f', -1, 64)
 }
 
 // Register registers the agent wallet in the BSC competition contract.
@@ -99,7 +114,7 @@ func (t *TWAKClient) GetBalance() (WalletBalance, error) {
 }
 
 // ExecuteBuy buys the given USD amount of token using TWAK's swap.
-// Equivalent to: twak swap USDT <token> --usd <amount> --chain bsc --slippage 2 --password <pw> --json
+// Equivalent to: twak swap USDT <token> --usd <amount> --chain bsc --slippage <pct> --password <pw> --json
 func (t *TWAKClient) ExecuteBuy(token string, amountUSD float64, expectedPrice float64) (*TradeReceipt, error) {
 	if t.cfg.DryRun {
 		return &TradeReceipt{
@@ -117,7 +132,7 @@ func (t *TWAKClient) ExecuteBuy(token string, amountUSD float64, expectedPrice f
 		"swap", "USDT", token,
 		"--usd", fmt.Sprintf("%.2f", amountUSD),
 		"--chain", "bsc",
-		"--slippage", "5",
+		"--slippage", t.slippageArg(),
 		"--password", t.cfg.Password,
 		"--json",
 	)
@@ -129,7 +144,7 @@ func (t *TWAKClient) ExecuteBuy(token string, amountUSD float64, expectedPrice f
 }
 
 // ExecuteSell sells the given USD amount of token back to USDT using TWAK's swap.
-// Equivalent to: twak swap <token> USDT --usd <amount> --chain bsc --slippage 2 --password <pw> --json
+// Equivalent to: twak swap <token> USDT --usd <amount> --chain bsc --slippage <pct> --password <pw> --json
 func (t *TWAKClient) ExecuteSell(token string, amountUSD float64, expectedPrice float64) (*TradeReceipt, error) {
 	if t.cfg.DryRun {
 		return &TradeReceipt{
@@ -147,7 +162,7 @@ func (t *TWAKClient) ExecuteSell(token string, amountUSD float64, expectedPrice 
 		"swap", token, "USDT",
 		"--usd", fmt.Sprintf("%.2f", amountUSD),
 		"--chain", "bsc",
-		"--slippage", "5",
+		"--slippage", t.slippageArg(),
 		"--password", t.cfg.Password,
 		"--json",
 	)

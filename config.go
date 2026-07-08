@@ -14,6 +14,7 @@ type AgentConfig struct {
 	TWAK                 TWAKConfig     `yaml:"twak"`
 	X402                 X402Config     `yaml:"x402"`
 	TradeIntervalMinutes int            `yaml:"trade_interval_minutes"`
+	MinGasBNBUSD         float64        `yaml:"min_gas_bnb_usd"` // warn when native BNB drops below this (gas reserve)
 	Strategy             StrategyConfig `yaml:"strategy"`
 	Policy               TradingPolicy  `yaml:"policy"`
 }
@@ -22,15 +23,19 @@ type AgentConfig struct {
 func DefaultAgentConfig() AgentConfig {
 	return AgentConfig{
 		CMCAPIKey:            "",
-		TWAK:                 TWAKConfig{DryRun: false},
+		TWAK:                 TWAKConfig{DryRun: false, SlippagePct: 5},
 		X402: X402Config{
 			Enabled:        true,
 			ServiceURL:     "https://agentsvc.io/api/search",
 			PaymentAsset:   "USDT",
 			MaxPaymentUSDC: 0.001,
 			MinBalanceUSD:  3.0,
+			// Binance-Peg USDT/USDC on BSC use 18 decimals. Keep 6 only if
+			// your twak build expects 6-decimal atomic units.
+			PaymentDecimals: 18,
 		},
 		TradeIntervalMinutes: 30,
+		MinGasBNBUSD:         0.25,
 		Strategy:             DefaultStrategyConfig(),
 		Policy:               DefaultPolicy(),
 	}

@@ -288,11 +288,17 @@ bnb-agent run        Start the autonomous 15-minute trading loop
   --verbose          Print full market data and guard stages
   --once             Run one iteration and exit
 bnb-agent register   Register agent wallet on BSC competition contract
+bnb-agent identity   Generate the ERC-8004 agent card (on-chain identity)
+bnb-agent halt       Circuit breaker — block ALL trades immediately
+bnb-agent resume     Release the circuit breaker
 bnb-agent audit      Print the tamper-evident trade audit trail
   --verify           Verify the SHA-256 hash chain
 bnb-agent demo       Run 7 guard pipeline attack scenarios (no keys needed)
 bnb-agent version    Print version
 ```
+
+The wallet password can be provided via the `TWAK_PASSWORD` environment
+variable instead of storing it in `config.yaml`.
 
 ---
 

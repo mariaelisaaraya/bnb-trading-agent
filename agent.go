@@ -73,6 +73,16 @@ func (a *Agent) iterate(verbose bool) error {
 	}
 	portfolioUSD := walletBal.TotalUSD
 
+	// Gas monitor: without native BNB the agent cannot sign any swap.
+	minGas := a.cfg.MinGasBNBUSD
+	if minGas == 0 {
+		minGas = 0.25
+	}
+	if err == nil && !a.cfg.TWAK.DryRun && walletBal.BNBUSD < minGas {
+		fmt.Printf("[warn] LOW GAS: native BNB balance $%.2f < $%.2f — swaps will start failing, top up the wallet\n",
+			walletBal.BNBUSD, minGas)
+	}
+
 	if receipt, fundErr := a.x402.SelfFund(portfolioUSD); fundErr != nil {
 		fmt.Printf("[warn] x402 self-fund: %v\n", fundErr)
 	} else if receipt != nil {
@@ -186,11 +196,11 @@ func (a *Agent) evaluateToken(now string, tok TokenConfig, walletBal WalletBalan
 		}
 	}
 
-	// Use per-token trade amount if set, otherwise fall back to global.
+	// Point the strategy at this token; use per-token trade amount if set.
 	cfg := a.cfg.Strategy
+	cfg.Token = tok.Symbol
+	cfg.TokenContract = tok.Contract
 	if tok.TradeAmountUSD > 0 {
-		cfg.Token = tok.Symbol
-		cfg.TokenContract = tok.Contract
 		cfg.TradeAmountUSD = tok.TradeAmountUSD
 	}
 
@@ -204,6 +214,12 @@ func (a *Agent) evaluateToken(now string, tok TokenConfig, walletBal WalletBalan
 	// Adjust trade amount to available balance.
 	available := signal.AmountUSD
 	if signal.Action == "buy" {
+		// Skip if we already hold a meaningful position — avoids repeated failed swaps.
+		existingUSD := guard.HoldingValueUSD(tok.Symbol, data.Price)
+		if existingUSD >= signal.AmountUSD*0.5 {
+			fmt.Printf("  Skip:      already holding $%.2f %s, skipping re-buy\n", existingUSD, tok.Symbol)
+			return data.Price
+		}
 		if walletBal.USDTUSD < signal.AmountUSD {
 			available = walletBal.USDTUSD * 0.90
 		}

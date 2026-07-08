@@ -1,4 +1,7 @@
 .env
 *.jsonl
 bnb-agent
+bnb-trading-agent
 run-live.sh
+agent-card.json
+HALT

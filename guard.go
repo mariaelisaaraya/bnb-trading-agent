@@ -2,10 +2,15 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+// HaltFileName is the circuit-breaker sentinel: while this file exists in the
+// config dir, every trade is blocked. Created/removed via `bnb-agent halt|resume`.
+const HaltFileName = "HALT"
 
 type TradeDecision struct {
 	Token     string
@@ -39,6 +44,7 @@ type TradeGuard struct {
 	state     *State
 	auditLog  *AuditLog
 	statePath string
+	haltPath  string
 	lock      *FileLock
 }
 
@@ -75,12 +81,23 @@ func NewTradeGuard(configDir string) (*TradeGuard, error) {
 		state:     state,
 		auditLog:  auditLog,
 		statePath: statePath,
+		haltPath:  filepath.Join(configDir, HaltFileName),
 		lock:      lock,
 	}, nil
 }
 
 func (g *TradeGuard) Run(tradeID string, d TradeDecision) GuardResult {
 	result := GuardResult{}
+
+	// Circuit breaker: emergency pause blocks everything before any other stage.
+	if _, err := os.Stat(g.haltPath); err == nil {
+		result.Decision = "block"
+		result.Reason = "circuit breaker engaged — run `bnb-agent resume` to re-enable trading"
+		result.Stages = []StageResult{{Name: "halt", Status: "ENGAGED"}}
+		g.logAudit(tradeID, d, result)
+		return result
+	}
+	result.Stages = append(result.Stages, StageResult{Name: "halt", Status: "clear"})
 
 	fields := map[string]any{
 		"token":     d.Token,
@@ -90,7 +107,7 @@ func (g *TradeGuard) Run(tradeID string, d TradeDecision) GuardResult {
 	if cred := ScanCredentials(fields); cred != nil {
 		result.Decision = "block"
 		result.Reason = fmt.Sprintf("credential detected in trade field %q: %s (%s)", cred.Field, cred.Type, cred.Redacted)
-		result.Stages = []StageResult{{Name: "credentials", Status: "DETECTED"}}
+		result.Stages = append(result.Stages, StageResult{Name: "credentials", Status: "DETECTED"})
 		g.logAudit(tradeID, d, result)
 		return result
 	}
