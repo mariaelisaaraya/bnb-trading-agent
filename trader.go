@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -223,17 +224,25 @@ func (t *TWAKClient) run(args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
+var txHashPattern = regexp.MustCompile(`0x[0-9a-fA-F]{64}`)
+
 func parseTWAKReceipt(raw, token, direction string, amountUSD, expectedPrice float64) (*TradeReceipt, error) {
-	var resp struct {
-		TxHash    string  `json:"tx_hash"`
-		Price     float64 `json:"execution_price"`
-		GasUSD    float64 `json:"gas_usd"`
+	// twak prints human-readable progress lines before the JSON receipt.
+	jsonPart := raw
+	if idx := strings.Index(jsonPart, "{"); idx > 0 {
+		jsonPart = jsonPart[idx:]
 	}
-	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
-		// TWAK might print the tx hash on a single line — handle gracefully.
-		txHash := strings.TrimSpace(raw)
+
+	var resp struct {
+		TxHash string  `json:"tx_hash"`
+		Hash   string  `json:"hash"` // twak >= 0.19 emits "hash"
+		Price  float64 `json:"execution_price"`
+		GasUSD float64 `json:"gas_usd"`
+	}
+	if err := json.Unmarshal([]byte(jsonPart), &resp); err != nil {
+		// No JSON receipt — salvage a tx hash from the raw output if present.
 		return &TradeReceipt{
-			TxHash:    txHash,
+			TxHash:    txHashPattern.FindString(raw),
 			Token:     token,
 			Direction: direction,
 			AmountUSD: amountUSD,
@@ -242,13 +251,21 @@ func parseTWAKReceipt(raw, token, direction string, amountUSD, expectedPrice flo
 		}, nil
 	}
 
+	txHash := resp.TxHash
+	if txHash == "" {
+		txHash = resp.Hash
+	}
+	if txHash == "" {
+		txHash = txHashPattern.FindString(raw)
+	}
+
 	price := resp.Price
 	if price == 0 {
 		price = expectedPrice
 	}
 
 	return &TradeReceipt{
-		TxHash:    resp.TxHash,
+		TxHash:    txHash,
 		Token:     token,
 		Direction: direction,
 		AmountUSD: amountUSD,
