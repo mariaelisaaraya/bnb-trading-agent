@@ -145,7 +145,7 @@ Para tokens sin historia, el agente usa solo Fear & Greed + momentum como señal
 
 ```
 bnb-trading-agent/
-├── agent.go        # loop principal y keep-alive
+├── agent.go        # loop principal
 ├── strategy.go     # lógica de trading (EMA, RSI, F&G)
 ├── indicators.go   # cálculo de EMA y RSI
 ├── guard.go        # pipeline de seguridad de 5 etapas
