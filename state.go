@@ -18,6 +18,13 @@ type Position struct {
 	LastSellAt int64   `json:"last_sell_at,omitempty"`
 }
 
+// PortfolioSample is one point-in-time portfolio valuation, used to compute
+// the rolling-window peak for the drawdown cap.
+type PortfolioSample struct {
+	Value float64 `json:"v"`
+	At    int64   `json:"at"`
+}
+
 // State persists trade counters, spend records, trade intents, and portfolio
 // tracking between agent loop iterations. Serialized to disk with file locking.
 type State struct {
@@ -26,7 +33,8 @@ type State struct {
 	Intents             map[string]TradeIntent   `json:"intents"`
 	Holdings            map[string]float64       `json:"holdings,omitempty"` // legacy qty-only tracking, migrated to Positions on load
 	Positions           map[string]*Position     `json:"positions"`
-	PeakPortfolioUSD    float64                  `json:"peak_portfolio_usd"`
+	PortfolioHistory    []PortfolioSample        `json:"portfolio_history,omitempty"`
+	PeakPortfolioUSD    float64                  `json:"peak_portfolio_usd"` // all-time high, informative only
 	CurrentPortfolioUSD float64                  `json:"current_portfolio_usd"`
 	TotalTradesExecuted int                      `json:"total_trades_executed"`
 }
@@ -196,12 +204,39 @@ func (s *State) position(token string) *Position {
 	return p
 }
 
-// UpdatePortfolio updates the portfolio value and tracks the peak.
-func (s *State) UpdatePortfolio(currentValueUSD float64) {
+// UpdatePortfolio records the portfolio value, appends a sample to the
+// rolling history (pruned to the window), and tracks the all-time high.
+func (s *State) UpdatePortfolio(currentValueUSD float64, window time.Duration) {
 	s.CurrentPortfolioUSD = currentValueUSD
 	if currentValueUSD > s.PeakPortfolioUSD {
 		s.PeakPortfolioUSD = currentValueUSD
 	}
+
+	now := time.Now().Unix()
+	s.PortfolioHistory = append(s.PortfolioHistory, PortfolioSample{Value: currentValueUSD, At: now})
+	cutoff := now - int64(window.Seconds())
+	pruned := s.PortfolioHistory[:0]
+	for _, sample := range s.PortfolioHistory {
+		if sample.At >= cutoff {
+			pruned = append(pruned, sample)
+		}
+	}
+	s.PortfolioHistory = pruned
+}
+
+// PeakOverWindow returns the highest portfolio valuation observed inside the
+// rolling window, or 0 if there are no samples yet. The drawdown cap measures
+// against this instead of the all-time high, so a stale peak from a portfolio
+// that no longer exists cannot lock the agent out of the market forever.
+func (s *State) PeakOverWindow(window time.Duration) float64 {
+	cutoff := time.Now().Add(-window).Unix()
+	var peak float64
+	for _, sample := range s.PortfolioHistory {
+		if sample.At >= cutoff && sample.Value > peak {
+			peak = sample.Value
+		}
+	}
+	return peak
 }
 
 // GetCalls returns recent call timestamps for rate limiting.

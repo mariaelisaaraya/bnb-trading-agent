@@ -195,6 +195,49 @@ func TestRecordBuyAveragesEntryAndSellClearsOnFullExit(t *testing.T) {
 	}
 }
 
+func TestRollingPeakIgnoresStaleHighs(t *testing.T) {
+	s := NewState()
+	window := 168 * time.Hour
+
+	// A competition-era peak outside the window must not count.
+	s.PortfolioHistory = []PortfolioSample{
+		{Value: 18.48, At: time.Now().Add(-10 * 24 * time.Hour).Unix()},
+	}
+	s.UpdatePortfolio(14.70, window)
+
+	if peak := s.PeakOverWindow(window); peak != 14.70 {
+		t.Fatalf("rolling peak = %f, want 14.70 (stale 18.48 must be ignored)", peak)
+	}
+	// The stale sample is also pruned from history.
+	if len(s.PortfolioHistory) != 1 {
+		t.Fatalf("expected stale sample pruned, history = %+v", s.PortfolioHistory)
+	}
+	// All-time high is still tracked for reporting.
+	if s.PeakPortfolioUSD != 14.70 {
+		t.Fatalf("all-time high = %f, want 14.70", s.PeakPortfolioUSD)
+	}
+
+	// A high inside the window does count.
+	s.UpdatePortfolio(16.00, window)
+	s.UpdatePortfolio(13.00, window)
+	if peak := s.PeakOverWindow(window); peak != 16.00 {
+		t.Fatalf("rolling peak = %f, want 16.00", peak)
+	}
+}
+
+func TestFirstRunHasNoDrawdownLock(t *testing.T) {
+	// Empty history → peak 0 → CheckPolicy must skip the drawdown stage.
+	s := NewState()
+	p := DefaultPolicy()
+	p.DrawdownCap = 0.15
+
+	peak := s.PeakOverWindow(p.DrawdownWindow())
+	res := CheckPolicy(p, "ETH", "buy", 4, nil, nil, 14.70, peak)
+	if !res.Allowed {
+		t.Fatalf("buy must be allowed with no portfolio history, got %+v", res)
+	}
+}
+
 func TestIndicatorSanity(t *testing.T) {
 	// Monotonic rising series: RSI must be high, EMA7 above EMA30.
 	rising := make([]float64, 40)

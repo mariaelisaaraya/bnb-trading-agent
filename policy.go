@@ -12,9 +12,21 @@ type TradingPolicy struct {
 	MaxTradeUSD       float64  `yaml:"max_trade_usd"`
 	DailyLossCapUSD   float64  `yaml:"daily_loss_cap_usd"`
 	DrawdownCap       float64  `yaml:"drawdown_cap"`
-	MaxTradesPerHour  int      `yaml:"max_trades_per_hour"`
-	SlippageTolerance float64  `yaml:"slippage_tolerance"`
-	AllowedTokens     []string `yaml:"allowed_tokens"`
+	// DrawdownWindowHours bounds the peak the drawdown cap measures against
+	// (rolling lookback, like freqtrade's MaxDrawdown protection). 0 = default 168h.
+	DrawdownWindowHours int      `yaml:"drawdown_window_hours"`
+	MaxTradesPerHour    int      `yaml:"max_trades_per_hour"`
+	SlippageTolerance   float64  `yaml:"slippage_tolerance"`
+	AllowedTokens       []string `yaml:"allowed_tokens"`
+}
+
+// DrawdownWindow returns the rolling lookback for the drawdown peak.
+func (p TradingPolicy) DrawdownWindow() time.Duration {
+	h := p.DrawdownWindowHours
+	if h <= 0 {
+		h = 168
+	}
+	return time.Duration(h) * time.Hour
 }
 
 type PolicyDecision string
@@ -41,11 +53,12 @@ type SpendRecord struct {
 
 func DefaultPolicy() TradingPolicy {
 	return TradingPolicy{
-		MaxTradeUSD:      200.00,
-		DailyLossCapUSD:  150.00,
-		DrawdownCap:      0.25,
-		MaxTradesPerHour: 4,
-		SlippageTolerance: 0.02,
+		MaxTradeUSD:         200.00,
+		DailyLossCapUSD:     150.00,
+		DrawdownCap:         0.25,
+		DrawdownWindowHours: 168,
+		MaxTradesPerHour:    4,
+		SlippageTolerance:   0.02,
 		AllowedTokens: []string{
 			"BNB", "CAKE", "USDT", "USDC", "BUSD", "ETH",
 			"BTCB", "ADA", "DOT", "LINK", "UNI", "AAVE",

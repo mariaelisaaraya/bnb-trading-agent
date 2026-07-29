@@ -121,7 +121,7 @@ func (g *TradeGuard) Run(tradeID string, d TradeDecision) GuardResult {
 		g.state.GetCalls(),
 		g.state.GetSpends(),
 		g.state.CurrentPortfolioUSD,
-		g.state.PeakPortfolioUSD,
+		g.state.PeakOverWindow(g.policy.DrawdownWindow()),
 	)
 	if !policyResult.Allowed {
 		result.Decision = "block"
@@ -179,7 +179,7 @@ func (g *TradeGuard) Close() {
 }
 
 func (g *TradeGuard) UpdatePortfolio(currentUSD float64) {
-	g.state.UpdatePortfolio(currentUSD)
+	g.state.UpdatePortfolio(currentUSD, g.policy.DrawdownWindow())
 }
 
 // HoursSinceLastTrade returns hours elapsed since the most recent executed trade.
