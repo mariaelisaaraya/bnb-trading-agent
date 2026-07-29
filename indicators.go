@@ -1,29 +1,34 @@
 package main
 
-// EMA computes the Exponential Moving Average for the given period.
+// EMA computes the Exponential Moving Average for the given period, seeded
+// with the SMA of the first `period` points (the standard construction).
 // Returns 0 if there are fewer data points than the period.
 func EMA(prices []float64, period int) float64 {
-	if len(prices) < period {
+	if period <= 0 || len(prices) < period {
 		return 0
 	}
+	var sum float64
+	for _, p := range prices[:period] {
+		sum += p
+	}
+	ema := sum / float64(period)
 	k := 2.0 / float64(period+1)
-	ema := prices[0]
-	for _, p := range prices[1:] {
+	for _, p := range prices[period:] {
 		ema = p*k + ema*(1-k)
 	}
 	return ema
 }
 
-// RSI computes the Wilder RSI for the given period (typically 14).
-// Returns 50 (neutral) if there are insufficient data points.
+// RSI computes the Wilder RSI for the given period (typically 14): the first
+// `period` changes seed the averages, then Wilder smoothing runs over the
+// rest of the series. Returns 50 (neutral) if there are insufficient points.
 func RSI(prices []float64, period int) float64 {
-	if len(prices) < period+1 {
+	if period <= 0 || len(prices) < period+1 {
 		return 50
 	}
 
-	start := len(prices) - period - 1
 	var gains, losses float64
-	for i := start + 1; i <= start+period; i++ {
+	for i := 1; i <= period; i++ {
 		change := prices[i] - prices[i-1]
 		if change > 0 {
 			gains += change
@@ -31,9 +36,21 @@ func RSI(prices []float64, period int) float64 {
 			losses -= change
 		}
 	}
-
 	avgGain := gains / float64(period)
 	avgLoss := losses / float64(period)
+
+	for i := period + 1; i < len(prices); i++ {
+		change := prices[i] - prices[i-1]
+		var gain, loss float64
+		if change > 0 {
+			gain = change
+		} else {
+			loss = -change
+		}
+		avgGain = (avgGain*float64(period-1) + gain) / float64(period)
+		avgLoss = (avgLoss*float64(period-1) + loss) / float64(period)
+	}
+
 	if avgLoss == 0 {
 		return 100
 	}

@@ -74,7 +74,7 @@ func TestEvaluateUsesPerTokenSymbol(t *testing.T) {
 	}
 
 	data := &MarketData{Symbol: "CAKE", Price: 2.5, FearGreedValue: 70, Change24h: 2.0, Change7d: 5.0}
-	sig := Evaluate(data, cfg)
+	sig := Evaluate(data, cfg, PositionState{})
 	if sig.Action == "hold" && sig.Reason != "" &&
 		sig.Reason[:6] == "market" {
 		t.Fatalf("symbol mismatch hold — per-token symbol not applied: %s", sig.Reason)

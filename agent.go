@@ -157,7 +157,16 @@ func (a *Agent) evaluateToken(now string, tok TokenConfig, walletBal WalletBalan
 		cfg.TradeAmountUSD = tok.TradeAmountUSD
 	}
 
-	signal := Evaluate(data, cfg)
+	// Update trailing-stop peak (and adopt a basis for legacy positions),
+	// then hand the position to the strategy for exit decisions.
+	guard.ObservePrice(tok.Symbol, data.Price)
+	pos := guard.Position(tok.Symbol)
+	if verbose && pos.Qty > 0 && pos.AvgEntry > 0 {
+		fmt.Printf("  Position:  %.6f %s @ $%.4f entry (PnL %+.1f%%, peak $%.4f)\n",
+			pos.Qty, tok.Symbol, pos.AvgEntry, (data.Price/pos.AvgEntry-1)*100, pos.PeakPrice)
+	}
+
+	signal := Evaluate(data, cfg, pos)
 	fmt.Printf("  Signal:    %s — %s\n", signal.Action, signal.Reason)
 
 	if signal.Action == "hold" {

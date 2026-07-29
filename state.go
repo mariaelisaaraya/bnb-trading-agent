@@ -8,13 +8,24 @@ import (
 	"time"
 )
 
+// Position tracks a single token holding with its cost basis, the peak price
+// seen while holding (trailing-stop reference), and the last sell time
+// (re-buy cooldown reference).
+type Position struct {
+	Qty        float64 `json:"qty"`
+	AvgEntry   float64 `json:"avg_entry"`
+	PeakPrice  float64 `json:"peak_price"`
+	LastSellAt int64   `json:"last_sell_at,omitempty"`
+}
+
 // State persists trade counters, spend records, trade intents, and portfolio
 // tracking between agent loop iterations. Serialized to disk with file locking.
 type State struct {
 	Calls               map[string][]int64       `json:"calls"`
 	Spends              map[string][]SpendRecord `json:"spends"`
 	Intents             map[string]TradeIntent   `json:"intents"`
-	Holdings            map[string]float64       `json:"holdings"` // token symbol → quantity held
+	Holdings            map[string]float64       `json:"holdings,omitempty"` // legacy qty-only tracking, migrated to Positions on load
+	Positions           map[string]*Position     `json:"positions"`
 	PeakPortfolioUSD    float64                  `json:"peak_portfolio_usd"`
 	CurrentPortfolioUSD float64                  `json:"current_portfolio_usd"`
 	TotalTradesExecuted int                      `json:"total_trades_executed"`
@@ -25,10 +36,10 @@ const tradeStateKey = "__bnbagent_trade__"
 // NewState creates an empty state.
 func NewState() *State {
 	return &State{
-		Calls:    make(map[string][]int64),
-		Spends:   make(map[string][]SpendRecord),
-		Intents:  make(map[string]TradeIntent),
-		Holdings: make(map[string]float64),
+		Calls:     make(map[string][]int64),
+		Spends:    make(map[string][]SpendRecord),
+		Intents:   make(map[string]TradeIntent),
+		Positions: make(map[string]*Position),
 	}
 }
 
@@ -46,6 +57,17 @@ func LoadState(path string) (*State, error) {
 	if err := json.Unmarshal(data, s); err != nil {
 		return nil, fmt.Errorf("parse state: %w", err)
 	}
+	if s.Positions == nil {
+		s.Positions = make(map[string]*Position)
+	}
+	// Migrate legacy qty-only holdings into positions. The cost basis is
+	// unknown (0); the agent adopts the next observed price as basis.
+	for token, qty := range s.Holdings {
+		if qty > 0 && s.Positions[token] == nil {
+			s.Positions[token] = &Position{Qty: qty}
+		}
+	}
+	s.Holdings = nil
 	s.prune()
 	return s, nil
 }
@@ -109,26 +131,69 @@ func (s *State) GetIntent(key string) *TradeIntent {
 	return &intent
 }
 
-// RecordBuy increases the tracked holding for a token.
+// RecordBuy increases the tracked position for a token, updating the average
+// cost basis and the peak price.
 func (s *State) RecordBuy(token string, amountUSD, price float64) {
 	if price <= 0 || amountUSD <= 0 {
 		return
 	}
-	if s.Holdings == nil {
-		s.Holdings = make(map[string]float64)
+	p := s.position(token)
+	totalCost := p.AvgEntry*p.Qty + amountUSD
+	p.Qty += amountUSD / price
+	p.AvgEntry = totalCost / p.Qty
+	if price > p.PeakPrice {
+		p.PeakPrice = price
 	}
-	s.Holdings[token] += amountUSD / price
 }
 
-// RecordSell decreases the tracked holding for a token (floor at zero).
+// RecordSell decreases the tracked position for a token and stamps the sell
+// time for the re-buy cooldown. A full exit resets basis and peak.
 func (s *State) RecordSell(token string, amountUSD, price float64) {
-	if price <= 0 || amountUSD <= 0 || s.Holdings == nil {
+	if price <= 0 || amountUSD <= 0 {
 		return
 	}
-	s.Holdings[token] -= amountUSD / price
-	if s.Holdings[token] < 0 {
-		s.Holdings[token] = 0
+	p, ok := s.Positions[token]
+	if !ok {
+		return
 	}
+	p.Qty -= amountUSD / price
+	p.LastSellAt = time.Now().Unix()
+	if p.Qty <= 1e-12 {
+		p.Qty = 0
+		p.AvgEntry = 0
+		p.PeakPrice = 0
+	}
+}
+
+// ObservePrice updates the trailing-stop peak for a held position. Positions
+// migrated from legacy state have no cost basis; the first observed price is
+// adopted as basis so stop-loss/take-profit can operate on them.
+func (s *State) ObservePrice(token string, price float64) {
+	if price <= 0 {
+		return
+	}
+	p, ok := s.Positions[token]
+	if !ok || p.Qty <= 0 {
+		return
+	}
+	if p.AvgEntry == 0 {
+		p.AvgEntry = price
+	}
+	if price > p.PeakPrice {
+		p.PeakPrice = price
+	}
+}
+
+func (s *State) position(token string) *Position {
+	if s.Positions == nil {
+		s.Positions = make(map[string]*Position)
+	}
+	p, ok := s.Positions[token]
+	if !ok {
+		p = &Position{}
+		s.Positions[token] = p
+	}
+	return p
 }
 
 // UpdatePortfolio updates the portfolio value and tracks the peak.
@@ -184,6 +249,13 @@ func (s *State) prune() {
 	for key, intent := range s.Intents {
 		if intent.RegisteredAt < intentCutoff {
 			delete(s.Intents, key)
+		}
+	}
+
+	// Closed positions are kept only while their cooldown window is relevant.
+	for token, p := range s.Positions {
+		if p.Qty <= 0 && p.LastSellAt < intentCutoff {
+			delete(s.Positions, token)
 		}
 	}
 }

@@ -116,6 +116,7 @@ func (g *TradeGuard) Run(tradeID string, d TradeDecision) GuardResult {
 	policyResult := CheckPolicy(
 		g.policy,
 		d.Token,
+		d.Direction,
 		d.AmountUSD,
 		g.state.GetCalls(),
 		g.state.GetSpends(),
@@ -158,7 +159,10 @@ func (g *TradeGuard) Run(tradeID string, d TradeDecision) GuardResult {
 	}
 
 	g.state.RecordTradeCall()
-	g.state.RecordTradeSpend(d.AmountUSD)
+	// Only buys count toward the daily spend cap — sells return capital.
+	if d.Direction == "buy" {
+		g.state.RecordTradeSpend(d.AmountUSD)
+	}
 
 	result.Decision = "allow"
 	g.logAudit(tradeID, d, result)
@@ -196,14 +200,34 @@ func (g *TradeGuard) HoursSinceLastTrade() float64 {
 
 // HoldingValueUSD returns the USD value of the tracked position for a single token.
 func (g *TradeGuard) HoldingValueUSD(token string, price float64) float64 {
-	if g.state.Holdings == nil || price <= 0 {
+	if price <= 0 {
 		return 0
 	}
-	qty := g.state.Holdings[token]
-	if qty <= 0 {
+	p, ok := g.state.Positions[token]
+	if !ok || p.Qty <= 0 {
 		return 0
 	}
-	return qty * price
+	return p.Qty * price
+}
+
+// Position returns the strategy-facing view of the tracked position for a token.
+func (g *TradeGuard) Position(token string) PositionState {
+	p, ok := g.state.Positions[token]
+	if !ok {
+		return PositionState{}
+	}
+	return PositionState{
+		Qty:        p.Qty,
+		AvgEntry:   p.AvgEntry,
+		PeakPrice:  p.PeakPrice,
+		LastSellAt: p.LastSellAt,
+	}
+}
+
+// ObservePrice updates the trailing-stop peak (and adopts a cost basis for
+// legacy positions) before the strategy evaluates the token.
+func (g *TradeGuard) ObservePrice(token string, price float64) {
+	g.state.ObservePrice(token, price)
 }
 
 // RecordHolding updates the tracked position for a token after a trade executes.
@@ -219,9 +243,9 @@ func (g *TradeGuard) RecordHolding(token, direction string, amountUSD, price flo
 // EstimateHoldingsUSD returns the USD value of tracked token holdings at given prices.
 func (g *TradeGuard) EstimateHoldingsUSD(prices map[string]float64) float64 {
 	var total float64
-	for token, qty := range g.state.Holdings {
-		if price, ok := prices[token]; ok && qty > 0 {
-			total += qty * price
+	for token, p := range g.state.Positions {
+		if price, ok := prices[token]; ok && p.Qty > 0 {
+			total += p.Qty * price
 		}
 	}
 	return total

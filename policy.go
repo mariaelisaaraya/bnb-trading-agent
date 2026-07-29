@@ -77,8 +77,16 @@ func SavePolicy(path string, p TradingPolicy) error {
 	return os.WriteFile(path, append(header, data...), 0600)
 }
 
-func CheckPolicy(p TradingPolicy, token string, amountUSD float64, calls []int64, spends []SpendRecord, portfolioValue, peakValue float64) PolicyResult {
+// CheckPolicy validates a trade against the risk policy.
+//
+// The capital-protection limits (daily spend cap, drawdown cap) apply only to
+// buys: they exist to stop deploying capital when losing, never to trap the
+// agent in a losing position. Sells (de-risking) always pass those stages —
+// the same model as freqtrade's MaxDrawdown/StoplossGuard protections, which
+// lock new entries but never exits.
+func CheckPolicy(p TradingPolicy, token, direction string, amountUSD float64, calls []int64, spends []SpendRecord, portfolioValue, peakValue float64) PolicyResult {
 	now := time.Now()
+	isBuy := direction == "buy"
 
 	if len(p.AllowedTokens) > 0 && !tokenAllowed(token, p.AllowedTokens) {
 		return PolicyResult{
@@ -110,7 +118,7 @@ func CheckPolicy(p TradingPolicy, token string, amountUSD float64, calls []int64
 		}
 	}
 
-	if p.DailyLossCapUSD > 0 {
+	if isBuy && p.DailyLossCapUSD > 0 {
 		cutoff := now.Add(-24 * time.Hour).Unix()
 		var totalSpent float64
 		for _, s := range spends {
@@ -121,19 +129,20 @@ func CheckPolicy(p TradingPolicy, token string, amountUSD float64, calls []int64
 		if totalSpent+amountUSD > p.DailyLossCapUSD {
 			return PolicyResult{
 				Decision: DecisionDailyCapHit,
-				Reason:   fmt.Sprintf("daily loss cap $%.2f reached", p.DailyLossCapUSD),
+				Reason:   fmt.Sprintf("daily spend cap $%.2f reached", p.DailyLossCapUSD),
 			}
 		}
 	}
 
-	// Stop trading if portfolio dropped more than DrawdownCap from peak.
-	// Competition disqualifies at 30% — cap is set at 25% for safety buffer.
-	if p.DrawdownCap > 0 && peakValue > 0 && portfolioValue > 0 {
+	// Stop deploying capital if portfolio dropped more than DrawdownCap from
+	// peak. Buys only: blocking sells here would trap the agent in a losing
+	// position with no way to reduce the drawdown.
+	if isBuy && p.DrawdownCap > 0 && peakValue > 0 && portfolioValue > 0 {
 		drawdown := (peakValue - portfolioValue) / peakValue
 		if drawdown >= p.DrawdownCap {
 			return PolicyResult{
 				Decision: DecisionDrawdownHit,
-				Reason:   fmt.Sprintf("drawdown %.1f%% exceeds cap %.1f%%", drawdown*100, p.DrawdownCap*100),
+				Reason:   fmt.Sprintf("drawdown %.1f%% exceeds cap %.1f%% — buys locked, sells still allowed", drawdown*100, p.DrawdownCap*100),
 			}
 		}
 	}
