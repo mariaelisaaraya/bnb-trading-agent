@@ -52,6 +52,9 @@ func RSI(prices []float64, period int) float64 {
 	}
 
 	if avgLoss == 0 {
+		if avgGain == 0 {
+			return 50 // flat series: neutral, not overbought
+		}
 		return 100
 	}
 	rs := avgGain / avgLoss
